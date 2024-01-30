@@ -197,7 +197,7 @@ def user_report(username):
     except prawcore.exceptions.Forbidden:
         return f"User u/{username} is likely already suspended."
     except prawcore.exceptions.NotFound:
-        return f"User u/{username} is likely already shadow-banned."
+        return f"User u/{username} is likely already shadow-banned or deleted."
     user_comments = list(user.comments.new(limit=250))
     user_created = int(user.created_utc)
     comments_dict = {}
@@ -365,7 +365,7 @@ def are_dictionaries_different(dict1, dict2):
 
 def wiki_template_creator(subreddit_object):
     """Creates a config page on the wiki if it doesn't already exist."""
-    wiki_template = "    full_bans: null\n    ignore: null\n    soft_bans: null"
+    wiki_template = "    full_bans: []\n    ignore: []\n    soft_bans: []"
 
     # Wikipage where the data is stored.
     wiki_page = subreddit_object.wiki.create(
@@ -381,8 +381,11 @@ def retrieve_main_ban_list(username, ban_type="soft", retrieve=False):
 
     :param username: Username we want to check.
     :param ban_type: soft or full - allows for different logic to be
-                     applied to a different subset of users. Currently,
-                     only full is implemented.
+                     applied to a different subset of users. Ignore
+                     means that the username will no longer be considered
+                     for a ban and is automatically added if the user
+                     has deleted their account or is suspended. Currently,
+                     only full and ignore are implemented.
     :param retrieve: True puts it in a read-only mode to fetch the ban
                      list.
     :return:
@@ -412,6 +415,13 @@ def retrieve_main_ban_list(username, ban_type="soft", retrieve=False):
     elif ban_type == "full":
         if username not in new_data["full_bans"] and username not in new_data["ignore"]:
             new_data["full_bans"].append(username)
+    elif ban_type == 'ignore':
+        if username in new_data["soft_bans"]:
+            new_data["soft_bans"].remove(username)
+        elif username in new_data["full_bans"]:
+            new_data["full_bans"].remove(username)
+        if username not in new_data["ignore"]:
+            new_data["ignore"].append(username)
 
     # Edit the wikipage if there's changed data.
     if are_dictionaries_different(existing_data, new_data):
@@ -529,7 +539,9 @@ def main_routine():
                         banned_user, ban_reason="Banned from ADA main list."
                     )
                 except praw.exceptions.RedditAPIException:
-                    logger.info(f"> u/{banned_user} no longer exists or is suspended.")
+                    logger.info(f"> u/{banned_user} no longer exists, is deleted, or is suspended.")
+                    retrieve_main_ban_list(banned_user, ban_type="ignore", retrieve=False)
+                    logger.info(f">> Added u/{banned_user} to the ignore list.")
                 else:
                     logger.info(
                         f"> u/{banned_user} BANNED on r/{subreddit.display_name}."
@@ -548,14 +560,15 @@ def main_routine():
             )
             # Message the original mod who applied the ban.
             report = user_report(banned_user)
-            banned_mod.message(
-                subject=f"[Notification] ADA ban applied for u/{banned_user} from r/{banned_sub}",
-                message=f"The user u/{banned_user} has been added to the ADA list and "
-                f"banned from {num_subreddits} subreddits.\n\n{report}",
-            )
-            logger.info(
-                f">> Messaged u/{banned_mod} about the ban they made from r/{banned_sub}."
-            )
+            if banned_mod:
+                banned_mod.message(
+                    subject=f"[Notification] ADA ban applied for u/{banned_user} from r/{banned_sub}",
+                    message=f"The user u/{banned_user} has been added to the ADA list and "
+                    f"banned from {num_subreddits} subreddits.\n\n{report}",
+                )
+                logger.info(
+                    f">> Messaged u/{banned_mod} about the ban they made from r/{banned_sub}."
+                )
     else:  # No one was banned this run.
         logger.debug(">> Nobody banned; no messages sent.")
 
@@ -568,6 +581,7 @@ if __name__ == "__main__":
     if len(sys.argv) > 1:  # Simply append any command line argument to test.
         print("### Entering testing mode.")
         login()
+        print(user_report('username'))
     else:
         try:
             try:
