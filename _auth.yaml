@@ -1,0 +1,7 @@
+username: 
+password: 
+user_agent: 
+version: 0.8
+app_id: 
+app_secret: 
+wiki:   # The configuration page will be at /ada_config on this subreddit.
